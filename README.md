@@ -1,183 +1,442 @@
-# CRG Group Project: CpG Markers for Melanoma Stage
+# CRG Group Project: CpG-Based Machine Learning for Melanoma Stage Classification
 
-An educational machine-learning project that investigates whether DNA methylation CpG markers can distinguish low-stage from high-stage melanoma. The aim is to identify an interpretable marker panel and evaluate its predictions on held-out patients.
+This project evaluates whether CpG methylation-related measurements can distinguish low-stage from high-stage melanoma and whether a compact CpG marker panel can retain useful predictive information.
 
-## Three-member notebooks
+The updated workflow compares regularized linear models, bagged decision trees, gradient-boosting models, and compact CpG panels. Model development is performed only in the development cohort using nested stratified cross-validation. Final locked models are evaluated once on an untouched 20% holdout set.
 
-Run in order: **Member 1 → Member 2 → Member 3**. Each member owns three numbered sections. Upload these three notebooks and this README to the repository root, replacing the existing README. Keep `Xsurv.csv` in place. The original combined notebook may remain in the repository for reference.
+## Main updated notebook
 
-| Member | Notebook | Sections | Colab |
-|---|---|---|---|
-| 1 | [Member_1_Data_EDA.ipynb](Member_1_Data_EDA.ipynb) | 1–3: audit, split, EDA | [Open in Colab](https://colab.research.google.com/github/UmairSeemab/CRG-groupProject/blob/main/Member_1_Data_EDA.ipynb) |
-| 2 | [Member_2_Models_Markers.ipynb](Member_2_Models_Markers.ipynb) | 4–6: nested CV, panel selection, stability | [Open in Colab](https://colab.research.google.com/github/UmairSeemab/CRG-groupProject/blob/main/Member_2_Models_Markers.ipynb) |
-| 3 | [Member_3_Evaluation_Reporting.ipynb](Member_3_Evaluation_Reporting.ipynb) | 7–9: test evaluation, annotation, reporting | [Open in Colab](https://colab.research.google.com/github/UmairSeemab/CRG-groupProject/blob/main/Member_3_Evaluation_Reporting.ipynb) |
-
-These links become available after uploading the updated notebooks to the root of the `main` branch. The notebooks now download their required input files directly from this repository, so no manual path editing or routine checkpoint upload is required in Colab.
-
-## Inputs and handoffs
-
-| Notebook | Required inputs | Repository source |
+| Notebook | Purpose | Google Colab |
 |---|---|---|
-| Member 1 | `Xsurv.csv` | Downloaded automatically from the repository root |
-| Member 2 | `development.joblib` | Downloaded automatically from the repository root |
-| Member 3 | `development.joblib`, `test_holdout.joblib`, `locked_models.joblib` | Downloaded automatically from the repository root |
+| [`CpG_step_by_step_XGBoost_LightGBM.ipynb`](CpG_step_by_step_XGBoost_LightGBM.ipynb) | Complete EDA, model comparison, CpG panel selection, XGBoost, LightGBM, held-out evaluation and exports | [Open in Colab](https://colab.research.google.com/github/UmairSeemab/CRG-groupProject/blob/main/CpG_step_by_step_XGBoost_LightGBM.ipynb) |
 
-Member 2 loads development data only. Member 3 uses the saved models without refitting them. Split identifiers and dataset fingerprints detect mismatched checkpoints. All three supplied checkpoint files were generated from the current `Xsurv.csv` using scikit-learn 1.8.0 and share the same split identifier. Because joblib uses Python pickle internally, only load these files from this trusted project repository.
+The notebook first looks for `Xsurv.csv` locally. If the file is not present, it automatically downloads:
 
+```text
+https://raw.githubusercontent.com/UmairSeemab/CRG-groupProject/main/Xsurv.csv
+```
 
-## Repository checkpoint files
+No manual data-path editing is normally required when the repository files are on the `main` branch.
 
-Upload these binary files to the repository root together with the notebooks:
+## Dataset
 
-| File | Produced by | Used by | SHA-256 |
-|---|---|---|---|
-| `development.joblib` | Member 1 | Members 2 and 3 | `bc7468949880e41993324eec684ff21c2217cb72cb6a69a523c604b02869d1fa` |
-| `test_holdout.joblib` | Member 1 | Member 3 | `828089986efbcc6b2928ffed78397270cfa8a948ffea58061de4590fad441794` |
-| `locked_models.joblib` | Member 2 | Member 3 | `8dea56b5a3658ac470d52f7773b76bf5bc36dfeed82068a71579073ed959c580` |
+The supplied [`Xsurv.csv`](Xsurv.csv) contains:
 
-All three files use split ID `890e3b671a04f0b2d22052aa026d6f49d63ed6b195e81040c93b0b5b1c4fb9ca` and source-data SHA-256 `06760b806726a4a5cc11aebef35e5630e7817f93bee60f169563b7d26a6c0d99`.
+| Item | Value |
+|---|---:|
+| Patients | 320 |
+| Predictor variables | 199 |
+| CpG variables | 197 |
+| Clinical predictors | AGE, SEX |
+| Outcome | Stage |
+| Low-stage observations | 157 |
+| High-stage observations | 163 |
+| Development cohort | 256 patients, 80% |
+| Held-out test cohort | 64 patients, 20% |
 
-The expected repository-root layout is:
+The first CSV column is used as the row identifier and is not treated as a predictor. Stage 1 is internally recoded to 0 and Stage 2 to 1, making high stage the positive class.
+
+The supplied file does not document the CpG transformation, assay platform, genome build, AGE units, or mapping of the SEX codes. These variables are therefore used as supplied without inventing metadata.
+
+## Analysis workflow
+
+The notebook follows this sequence:
+
+```text
+Xsurv.csv
+    |
+    v
+Data audit
+    |
+    v
+80/20 stratified development-test split
+    |
+    +------------------------------+
+    |                              |
+    v                              v
+Development set                 Test set
+256 patients                    64 patients
+    |                              |
+    v                              |
+EDA on development data            |
+    |                              |
+    v                              |
+5 x 3 nested stratified CV          |
+    |                              |
+    v                              |
+Model + hyperparameter selection    |
+    |                              |
+    v                              |
+Lock models and CpG panel           |
+    |                              |
+    +----------------------------->|
+                                   v
+                         One-time held-out evaluation
+                                   |
+                                   v
+                       Metrics + bootstrap intervals
+```
+
+The held-out test set is not used for exploratory analysis, feature selection, hyperparameter tuning, model selection, or threshold optimization.
+
+## Exploratory data analysis
+
+EDA is restricted to the development cohort and includes:
+
+- dataset structure, missingness, duplicate and constant-column checks
+- AGE and SEX distributions
+- CpG value distribution
+- pairwise CpG correlations
+- identification of highly correlated CpG pairs
+- PCA of standardized CpG measurements
+
+PCA is used only for visualization. PCA components are not used as classifier inputs.
+
+## Machine-learning models
+
+The updated analysis evaluates 15 predefined model configurations.
+
+### Clinical-only models
+
+Predictors: `AGE` and `SEX`.
+
+1. Clinical elastic-net logistic regression
+2. Clinical random forest
+3. Clinical XGBoost
+4. Clinical LightGBM
+
+### CpG-only models
+
+Predictors: all 197 CpGs.
+
+5. CpG elastic-net logistic regression
+6. CpG random forest
+7. CpG XGBoost
+8. CpG LightGBM
+
+### Combined models
+
+Predictors: `AGE`, `SEX`, and all 197 CpGs.
+
+9. Combined elastic-net logistic regression
+10. Combined random forest
+11. Combined XGBoost
+12. Combined LightGBM
+
+### Compact CpG-panel models
+
+13. 5-CpG panel + logistic regression
+14. 10-CpG panel + logistic regression
+15. 20-CpG panel + logistic regression
+
+The compact panels use training-only `SelectKBest(f_classif)` feature ranking inside the machine-learning pipeline.
+
+## Why these model families are included
+
+| Model | Reason for inclusion |
+|---|---|
+| Elastic-net logistic regression | Regularized linear model suitable for many potentially correlated CpG predictors. It combines L1- and L2-type shrinkage. |
+| Random forest | Nonlinear tree ensemble that can model interactions without feature scaling. |
+| XGBoost | Regularized sequential gradient boosting that can capture nonlinear relationships and predictor interactions. |
+| LightGBM | Efficient histogram-based gradient boosting that provides an additional nonlinear boosting approach for tabular data. |
+| Compact CpG logistic panels | Tests whether a smaller and more interpretable marker set can retain useful discriminatory information. |
+
+The purpose is controlled model comparison rather than an exhaustive benchmark of every possible machine-learning algorithm.
+
+## Hyperparameter tuning
+
+The tuning grids are intentionally small because the development cohort contains only 256 patients.
+
+### Elastic-net logistic regression
+
+```text
+C = 0.03, 0.3, 3
+l1_ratio = 0.25, 0.75
+```
+
+### Random forest
+
+```text
+n_estimators = 150
+max_depth = 3 or None
+min_samples_leaf = 3 or 8
+```
+
+### XGBoost
+
+Fixed settings include 200 trees, subsampling, column subsampling and histogram tree construction.
+
+Tuned parameters:
+
+```text
+max_depth = 2 or 3
+learning_rate = 0.03 or 0.10
+```
+
+### LightGBM
+
+Fixed settings include 200 estimators, minimum child samples and column subsampling.
+
+Tuned parameters:
+
+```text
+num_leaves = 7 or 15
+learning_rate = 0.03 or 0.10
+```
+
+### Compact CpG panels
+
+```text
+Panel size = 5, 10 or 20 CpGs
+Logistic-regression C = 0.03, 0.3 or 3
+```
+
+All scaling, feature selection and parameter fitting occur inside the corresponding training partitions.
+
+## Evaluation strategy
+
+### 1. Stratified 80/20 holdout split
+
+The full dataset is divided into:
+
+- 80% development data: 256 patients
+- 20% held-out test data: 64 patients
+
+Stratification preserves the low-stage/high-stage distribution.
+
+### 2. Nested stratified cross-validation
+
+Model development uses:
+
+```text
+Outer CV = 5 folds
+Inner CV = 3 folds
+```
+
+The inner loop selects hyperparameters using ROC-AUC. The outer loop estimates development-set performance of the complete tuning procedure.
+
+This design reduces optimistic bias that would occur if model tuning and performance estimation used the same validation data.
+
+### 3. Primary and secondary metrics
+
+Primary model-selection metric:
+
+```text
+ROC-AUC
+```
+
+Secondary development metrics:
+
+- balanced accuracy
+- sensitivity for high stage
+- specificity for low stage
+
+Threshold-dependent metrics use a prespecified probability threshold of `0.5`. The threshold is not optimized on the test set.
+
+## Model locking before test evaluation
+
+Before the held-out test set is evaluated, the notebook locks:
+
+1. the compact CpG panel selected by the prespecified panel rule
+2. the highest-AUC model overall
+3. the strongest clinical-only model
+4. the strongest full-CpG model
+5. the best XGBoost configuration
+6. the best LightGBM configuration
+
+Duplicate roles are automatically removed when the same model satisfies more than one category.
+
+The compact-panel rule selects the smallest panel whose mean nested-CV ROC-AUC is within `0.02` of the best compact panel. This is a practical selection rule and is not a statistical noninferiority test.
+
+## Held-out test evaluation
+
+Locked models are fitted using the complete development cohort and then evaluated once on the untouched 64-patient test cohort.
+
+Reported test metrics include:
+
+- ROC-AUC
+- average precision
+- balanced accuracy
+- sensitivity
+- specificity
+- Brier score
+- ROC curves
+- precision-recall curves
+- confusion matrix for the selected compact panel
+
+### Bootstrap uncertainty
+
+The notebook uses:
+
+```text
+2,000 stratified bootstrap resamples
+```
+
+The 2.5th and 97.5th percentiles provide conditional 95% bootstrap intervals for held-out performance.
+
+These intervals quantify sampling uncertainty in the held-out patients conditional on the fitted models. They do not capture all uncertainty from model selection, preprocessing, or unknown upstream generation of `Xsurv.csv`.
+
+## Generated figures
+
+All figures are written to `Xsurv_results/`.
+
+| Figure | Description |
+|---|---|
+| `01_split.png` | Development-test class distribution |
+| `02_distributions.png` | Clinical and CpG distributions in development data |
+| `03_correlations.png` | CpG correlation analysis |
+| `04_pca.png` | Exploratory PCA of development-set CpGs |
+| `05_nested_comparison.png` | Outer-fold ROC-AUC for all 15 model configurations |
+| `05b_algorithm_feature_heatmap.png` | Mean nested-CV ROC-AUC for elastic-net, random forest, XGBoost and LightGBM across clinical, CpG and combined predictor sets |
+| `06_panel_sizes.png` | Comparison of 5-, 10- and 20-CpG panels with the CpG elastic-net model |
+| `07_marker_stability.png` | CpG selection/stability analysis across outer training folds |
+| `08_marker_distributions.png` | Development-set distributions for selected CpGs |
+| `09_test_performance.png` | Held-out ROC curves, precision-recall curves and compact-panel confusion matrix |
+| `10_test_intervals.png` | Held-out ROC-AUC estimates with conditional 95% bootstrap intervals |
+
+## Generated result files
+
+The notebook also writes:
+
+| File | Contents |
+|---|---|
+| `data_audit.csv` | Dataset audit summary |
+| `split_manifest.csv` | Development/test membership |
+| `high_correlations_development.csv` | Highly correlated CpG pairs |
+| `nested_cv_folds.csv` | Fold-level nested-CV metrics and tuned parameters |
+| `nested_cv_summary.csv` | Mean model performance across outer folds |
+| `marker_ranking.csv` | CpG selection/stability information |
+| `final_panel.csv` | Locked compact CpGs, coefficients and annotation status |
+| `test_metrics.csv` | Held-out point estimates |
+| `test_intervals.csv` | Bootstrap uncertainty intervals |
+| `test_predictions.csv` | Held-out predicted probabilities for each locked model |
+| `analysis_manifest.json` | Seed, settings, selected models, selected CpGs, software versions and input checksum |
+
+The final XGBoost and LightGBM results should be read from `nested_cv_summary.csv`, `test_metrics.csv`, and `test_intervals.csv` after running the complete 5 x 3 nested-CV analysis. The README does not hard-code a boosting-model winner before that full run is completed.
+
+## Run in Google Colab
+
+1. Upload these files to the root of the GitHub repository:
+
+```text
+README.md
+Xsurv.csv
+CpG_step_by_step_XGBoost_LightGBM.ipynb
+```
+
+2. Open the notebook using the Colab badge/link above.
+3. Use a fresh CPU runtime.
+4. Run the cells from top to bottom.
+5. If XGBoost or LightGBM is unavailable, the setup cell installs the missing package automatically.
+6. The notebook looks for `Xsurv.csv` locally and downloads it directly from the GitHub repository if needed.
+7. Retrieve figures and tables from `Xsurv_results/` after execution.
+
+The full nested cross-validation is computationally heavier than the original workflow because XGBoost and LightGBM are now included in all three predictor-set comparisons.
+
+## Run locally
+
+Python 3 and Jupyter are required.
+
+Install the main dependencies:
+
+```bash
+python -m pip install jupyterlab numpy pandas scipy scikit-learn matplotlib seaborn xgboost lightgbm
+```
+
+Then start Jupyter:
+
+```bash
+python -m jupyterlab
+```
+
+Open:
+
+```text
+CpG_step_by_step_XGBoost_LightGBM.ipynb
+```
+
+and run all cells in order.
+
+## Suggested repository layout
 
 ```text
 CRG-groupProject/
 ├── README.md
 ├── Xsurv.csv
-├── development.joblib
-├── test_holdout.joblib
-├── locked_models.joblib
+├── CpG_step_by_step_XGBoost_LightGBM.ipynb
+├── CpG_step_by_step.ipynb
 ├── Member_1_Data_EDA.ipynb
 ├── Member_2_Models_Markers.ipynb
 ├── Member_3_Evaluation_Reporting.ipynb
-├── CpG_step_by_step.ipynb
 └── project_Xsurv.ipynb
 ```
 
-## Run in Google Colab
+`CpG_step_by_step_XGBoost_LightGBM.ipynb` is the updated combined analysis containing XGBoost and LightGBM.
 
-1. Upload the updated notebooks, `README.md`, `Xsurv.csv`, `development.joblib`, `test_holdout.joblib`, and `locked_models.joblib` to the root of the GitHub `main` branch.
-2. Open your assigned notebook using its Colab link above.
-3. Start a fresh CPU runtime and run cells from top to bottom. The setup cell installs missing dependencies and aligns scikit-learn to 1.8.0.
-4. The input-loading cell automatically downloads the files required by that notebook from `https://raw.githubusercontent.com/UmairSeemab/CRG-groupProject/main/`. Joblib inputs are stored in the runtime `checkpoints/` directory. Existing local files are reused.
-5. If GitHub is temporarily unavailable or a required file has not yet been uploaded to the repository, the notebook falls back to the Colab file-upload picker.
-6. Run the remaining analysis cells. The final optional cell downloads the results ZIP and any checkpoint generated by that notebook.
-
-No manual file-path changes are needed. If Member 1 or Member 2 is rerun after changing the data, split, settings, or model code, regenerate and replace the dependent checkpoint files together so their split identifiers remain consistent.
-
-For optional annotation, Member 3 can upload `CpG_annotation.csv` through the Files panel before Section 8. Without it, evaluation still runs and annotations remain unresolved.
-
-Save edited notebooks separately using Colab's save/download options. Download checkpoints and outputs before ending the runtime.
-
-### Verification scope
-
-The checkpoint files in this package were generated by executing Member 1 followed by Member 2 with the supplied `Xsurv.csv`. Member 3 was then used to verify checkpoint compatibility and the held-out evaluation workflow. The automatic GitHub paths are configured for the repository root. A live Google-hosted Colab session was not used for this local verification, so the upload fallback remains available if GitHub access is unavailable in a runtime.
-
-## Run locally
-
-Keep the notebooks and `Xsurv.csv` in the same project directory. Install dependencies:
-
-```bash
-python -m pip install jupyterlab numpy pandas scipy scikit-learn==1.8.0 matplotlib seaborn joblib
-python -m jupyterlab
-```
-
-Run Member 1, then Member 2, then Member 3, each from a fresh kernel when regenerating the workflow. If using the same project directory, checkpoints are found automatically in `checkpoints/`. The repository-root checkpoint files also allow Members 2 and 3 to run directly in Colab without first executing earlier notebooks in that Colab session.
-
-Outputs are saved in `Xsurv_results/member_1/`, `member_2/` and `member_3/`. The three checkpoint files required for the handoff are included in this delivery and should be uploaded to the GitHub repository root.
-
-## Dataset
-
-[Xsurv.csv](Xsurv.csv) contains 320 rows and 200 variables, excluding the first column used as the row identifier.
-
-| Variable | Description |
-|---|---|
-| `Stage` | Target: 1 = low stage; 2 = high stage, as defined in the assignment |
-| `AGE` | Supplied age variable; units and preprocessing require confirmation |
-| `SEX` | Codes 1 and 2; male/female mapping is not documented in the supplied files |
-| 197 `cg…` columns | CpG measurements; the original transformation and filtering require confirmation |
-
-There are 157 low-stage and 163 high-stage observations. The analysis recodes them to 0 and 1 internally, with high stage as the positive class. It uses 256 development patients and 64 test patients, with a stratified split and seed 42.
-
-The CSV contains no survival-time or event-status columns. This project evaluates stage classification.
-
-## Workflow and group responsibilities
-
-All members should understand the setup cell and use the same split and configuration. Members 2 and 3 load these settings from the checkpoints. To change the design, update Member 1 and regenerate the entire sequence.
-
-| Section | Task | Owner |
-|---|---|---|
-| 1 | Load and audit the dataset | Member 1 |
-| 2 | Reserve the test set before exploration | Member 1 |
-| 3 | Explore development patients: distributions, correlations and PCA | Member 1 |
-| 4 | Define models and run nested validation | Member 2 |
-| 5 | Lock model and panel choices before testing | Member 2 |
-| 6 | Assess marker stability and interpret coefficients | Member 2 |
-| 7 | Evaluate locked models on held-out patients | Member 3 |
-| 8 | Add verified biological annotation when available | Member 3 |
-| 9 | Export results and summarize evidence | Member 3 |
-
-Member 3 also helps review validation code. All members review the final interpretation together.
-
-## Modeling and evaluation
-
-- Compare clinical-only (`AGE`, `SEX`), CpG-only and combined predictor sets.
-- Evaluate elastic-net logistic regression and random forest.
-- Compare 5-, 10- and 20-CpG panels selected by training-only ANOVA F scores and modeled with L2 logistic regression.
-- Use five outer folds and three inner folds for nested cross-validation.
-- Fit scaling and feature selection inside training folds.
-- Select the smallest panel within 0.02 mean cross-validation AUC of the best compact panel. This is a practical selection rule, not proof of equivalent performance.
-- Use a fixed classification threshold of 0.5.
-- Report ROC-AUC, balanced accuracy, sensitivity, specificity, precision–recall curves and a confusion matrix.
-- Estimate conditional test uncertainty with 2,000 stratified bootstrap resamples.
-
-PCA is exploratory and is not used as input to the classifiers. Marker-selection frequency describes consistency across five overlapping training sets; it is not a probability that a marker is biologically valid.
-
-## Results in the saved notebook
-
-The development-based selection rule chose a 20-CpG panel. Its held-out ROC-AUC was **0.609**, with a conditional 95% bootstrap interval of **0.467–0.743**.
-
-The interval includes chance-level AUC of 0.5, so these results do not establish reliable stage prediction. The interval reflects test-sample uncertainty conditional on the fitted model, not all uncertainty in data preparation and model selection. These markers remain exploratory candidates.
-
-The test results have already been inspected. Further choices motivated by these results should be reported as exploratory; fresh independent data would be needed for a new final assessment.
-
-## Generated outputs
-
-Across the three notebooks, running the workflow creates the following outputs under `Xsurv_results/member_1/`, `member_2/` and `member_3/`:
-
-| Output | Contents |
-|---|---|
-| `01_split.png` through `10_test_intervals.png` | Ten figures covering exploration, model comparison, markers and test performance |
-| `data_audit.csv` | Dataset checks |
-| `split_manifest.csv` | Development/test membership |
-| `high_correlations_development.csv` | Highly correlated CpG pairs in development data |
-| `nested_cv_folds.csv`, `nested_cv_summary.csv` | Fold-level and summarized model results |
-| `marker_ranking.csv` | CpG selection frequencies and elastic-net summaries |
-| `final_panel.csv` | Selected CpGs, coefficients and annotation status |
-| `test_metrics.csv`, `test_intervals.csv` | Held-out estimates and uncertainty intervals |
-| `test_predictions.csv` | High-stage probabilities for test patients |
-| `analysis_manifest.json` | Settings, selected markers, model parameters, software versions and input checksum |
-
-These files are generated on execution and are not included in the supplied repository archive. Subsequent runs overwrite files with the same names in this output directory.
+The existing three-member notebooks represent the earlier split workflow unless they are separately updated. Do not assume that XGBoost and LightGBM are present in `Member_2_Models_Markers.ipynb` or `Member_3_Evaluation_Reporting.ipynb` solely because they are included in the combined notebook.
 
 ## Optional CpG annotation
 
-Gene mapping is unresolved until the assay platform and matching annotation manifest are verified. To enable the merge, place `CpG_annotation.csv` in Member 3's working directory, with these columns:
+The dataset contains CpG probe identifiers but does not provide a verified platform manifest or gene mapping.
+
+If a verified annotation file is available, create:
+
+```text
+CpG_annotation.csv
+```
+
+with columns:
 
 ```text
 CpG,Gene,Chromosome,Position,Genome_build,Annotation_source
 ```
 
-Use one row per CpG. Preserve multiple gene mappings within the `Gene` field. In Colab, upload this file before running Section 8. Member 3's notebook merges supplied annotations but does not independently verify their correctness. Without this file, it exports unresolved annotations and continues.
+The notebook merges this file when available. Otherwise, selected CpGs remain explicitly unannotated rather than assigning unsupported gene mappings.
 
-## Scientific background
+## Interpretation
 
-The original assignment cites Li et al., *Efficient gradient boosting for prognostic biomarker discovery*, Bioinformatics 38(6), 1631–1638 (2022): [article and DOI](https://doi.org/10.1093/bioinformatics/btab869).
+The project performs internal validation of melanoma stage classification. It does not establish that the selected CpGs are validated biological biomarkers.
 
-That study introduces Xsurv for survival analysis and uses a melanoma methylation example. This educational project addresses the assignment's stage-classification question. It does not reproduce the article's survival analysis or directly compare performance with its survival models. The exact steps used to derive the supplied CSV still require verification.
+Important limitations include:
 
-Additional resources:
+- one supplied dataset only
+- 64 patients in the held-out test set
+- no independent external validation cohort
+- unknown upstream CpG filtering and transformation
+- no supplied batch, site or patient-level dependency information
+- unverified AGE and SEX metadata
+- no verified CpG annotation manifest
 
-- [Xsurv repository cited by the assignment](https://github.com/wanglab1/Xsurv)
-- [scikit-learn: avoiding data leakage](https://scikit-learn.org/stable/common_pitfalls.html)
-- [scikit-learn: nested cross-validation](https://scikit-learn.org/stable/auto_examples/model_selection/plot_nested_cross_validation_iris.html)
-- [Google Colab GitHub integration example](https://colab.research.google.com/github/googlecolab/colabtools/blob/main/notebooks/colab-github-demo.ipynb)
+Feature-selection frequency indicates reproducibility within overlapping development folds. It is not the probability that a CpG is biologically valid.
+
+Similarly, a higher ROC-AUC for XGBoost, LightGBM, elastic-net or random forest should be interpreted as predictive performance in this internal analysis, not biological evidence or clinical utility.
+
+## Scientific scope
+
+The supplied assignment references:
+
+Li et al. *Efficient gradient boosting for prognostic biomarker discovery*. Bioinformatics. 2022;38(6):1631-1638. DOI: 10.1093/bioinformatics/btab869.
+
+The present project uses the supplied melanoma data for binary stage classification. It does not reproduce the original survival-analysis methodology.
+
+Useful documentation:
+
+- XGBoost: https://xgboost.readthedocs.io/
+- LightGBM: https://lightgbm.readthedocs.io/
+- scikit-learn nested cross-validation: https://scikit-learn.org/stable/auto_examples/model_selection/plot_nested_cross_validation_iris.html
+- scikit-learn common pitfalls and data leakage: https://scikit-learn.org/stable/common_pitfalls.html
+
+## Reproducibility
+
+The notebook records:
+
+- random seed
+- development/test split
+- outer and inner CV folds
+- selected model roles
+- selected CpGs
+- tuned hyperparameters
+- package versions
+- SHA-256 checksum of the input dataset
+
+Keep the untouched test set reserved for the final evaluation. Do not repeatedly change seeds, models, features, or thresholds based on held-out test performance.
